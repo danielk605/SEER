@@ -121,6 +121,20 @@ def gaussian_spectrum_generator(zeiss, peak_lambda, sigma):
     return spectrum
 
 
+def gspec_loop_generator(zeiss, sigma):
+    all_spec = zeros((zeiss.shape[1],zeiss.shape[1]))
+    for i, wavelength in enumerate(zeiss):
+        all_spec[i,:] = gaussian_spectrum_generator(zeiss, wavelength, 10*sigma)
+
+
+def gspec_generator(zeiss, sigma):
+    zeiss_zero = zeiss.ravel().astype('float64')
+    all_spec = zeiss_zero[numpy.newaxis,:] - zeiss_zero[:,numpy.newaxis] 
+    all_spec = numpy.exp((-numpy.power(all_spec, 2)/ (2*sigma**2)))
+    all_spec = all_spec / numpy.sum(all_spec, axis=-1)[:,numpy.newaxis]
+    return all_spec
+
+
 def spectrum_FT(harmonic_number,spectrum,deltalambda):
     # if harmonic has not been inserted
     spectral_channels = spectrum.shape[0]
@@ -136,9 +150,9 @@ def spectrum_FT(harmonic_number,spectrum,deltalambda):
     spec = numpy.arange(spectral_channels, dtype='float64')
 
     Gn = numpy.cos(omega * (spec + 1 - 0.5))
-    Gn = numpy.tensordot(Gn, spectrum*deltalambda, axes=([0], [0]))
+    Gn = numpy.tensordot(Gn, spectrum*deltalambda, axes=([-1], [-1]))
     Sn = numpy.sin(omega * (spec + 1 - 0.5))
-    Sn = numpy.tensordot(Sn, spectrum*deltalambda, axes=([0], [0]))
+    Sn = numpy.tensordot(Sn, spectrum*deltalambda, axes=([-1], [-1]))
 
     area = (spectrum*deltalambda).sum()
     # + 0.5 * spectrum[(0, last_channel), :, :].sum
@@ -150,7 +164,6 @@ def spectrum_FT(harmonic_number,spectrum,deltalambda):
 
 def test_wavelength(harmonic_number):
     zeiss = channel2wavelength()
-
 
     fig, phasor_axes = pre_plot()
     spectra_axes = fig.add_subplot(222)
@@ -164,14 +177,13 @@ def test_wavelength(harmonic_number):
     # phasor_axes.set_color_cycle([cmap(i) for i in numpy.linspace(0, 1, zeiss.shape[1])])
     # phasor_axes.set_color_cycle([cmap(1. * i / zeiss.shape[1]) for i in range(zeiss.shape[1])])
 
-
     colors = [cmap(1. * i / zeiss.shape[1]) for i in range(zeiss.shape[1])]
     for sigma in range(3,4):
         G ,S = [], []
         for wavelength in range(0, zeiss.shape[1]):
         # for wavelength in range(14, 15):
 
-            spectrum= gaussian_spectrum_generator(zeiss, zeiss[0, wavelength], 10*sigma)
+            spectrum = gaussian_spectrum_generator(zeiss, zeiss[0, wavelength], 10*sigma)
 
             g,s = spectrum_FT(harmonic_number,spectrum,deltalambda)
 
@@ -197,26 +209,80 @@ def test_wavelength(harmonic_number):
     # plt.title('harmonic' + str(harmonic_number))
 
 
+def colorimpaired_cmap(rad):
+    myCmap = np.ones((rad.shape + (3,)), dtype='float')
+    sideLen = np.float16(1/11)
+    myCmap[np.logical_and(rad >= 0, rad < sideLen),:] = (127, 59, 8)
+    myCmap[np.logical_and(rad >= sideLen, rad < 2 * sideLen), :] = (179, 88, 6)
+    myCmap[np.logical_and(rad >= 2 * sideLen, rad < 3 * sideLen), :] = (224, 130, 20)
+    myCmap[np.logical_and(rad >= 3 * sideLen, rad < 4 * sideLen), :] = (253, 184, 99)
+    myCmap[np.logical_and(rad >= 4 * sideLen, rad < 5 * sideLen), :] = (254, 224, 182)
+    myCmap[np.logical_and(rad >= 5 * sideLen, rad < 6 * sideLen), :] = (247, 247, 247)
+    myCmap[np.logical_and(rad >= 6 * sideLen, rad < 7 * sideLen), :] = (216, 218, 235)
+    myCmap[np.logical_and(rad >= 7 * sideLen, rad < 8 * sideLen), :] = (178, 171, 210)
+    myCmap[np.logical_and(rad >= 8 * sideLen, rad < 9 * sideLen), :] = (128, 115, 172)
+    myCmap[np.logical_and(rad >= 9 * sideLen, rad < 10 * sideLen), :] = (84, 39, 136)
+    myCmap[np.logical_and(rad >= 10 * sideLen, rad < 11 * sideLen), :] = (45, 0, 75)
+
+    myCmap = myCmap/255
+    return myCmap
+
+
 def convert_gs_rgb(g,s, cbox_index=3):
     bins = 512  # VM.bins
 
     rows = s
     cols = g
 
-    if cbox_index == 3:
-        rad = numpy.minimum(numpy.sqrt(numpy.power(rows, 2) + numpy.power(cols, 2)) / (bins / 2), 1)
-        theta = numpy.arctan2(rows, cols)
-        theta[theta < 0] += 2 * numpy.pi
-        theta /= 2 * numpy.pi
+    rad = numpy.minimum(numpy.sqrt(numpy.power(rows, 2) + numpy.power(cols, 2)) / (bins / 2), 1)
+    theta = numpy.arctan2(rows, cols)
+    theta[theta < 0] += 2 * numpy.pi
+    theta /= 2 * numpy.pi
 
+    if cbox_index == 3:
         hue = theta
         val = 1 - 0.85 * rad
         sat = numpy.ones_like(val)
 
-        G = numpy.stack((hue, sat, val), axis=-1)
-        G = hsv_to_rgb(G)
+    elif cbox_index == 4:
+        hue = theta
+        val = rad
+        sat = np.ones_like(val)
+
+    elif cbox_index == 5:
+        # radius
+        tmp = mplcm.jet(rad)
+        tmp = tmp[:, :, 0:3]
+
+    elif cbox_index == 6:
+        # angle
+        hue = theta
+        val = np.ones_like(hue)
+        sat = np.ones_like(val)
+    
+    elif cbox_index == 7:
+        # colorimpaired
+        tmp = colorimpaired_cmap(theta)
+
+    if not (cbox_index == 5 or cbox_index == 7):
+        tmp = np.stack((hue, sat, val), axis=-1)
+        tmp = hsv_to_rgb(tmp)
+
+    G = hsv_to_rgb(tmp)
 
     return G
+
+
+def generate_colorbar(wavelength_range, cbox_index):
+
+    G, S = 0
+    cmap = convert_gs_rgb(G, S, cbox_index=cbox_index)
+    norm = mpl.colors.Normalize(vmin=wavelength[0], vmax=wavelength[-1])
+    cb1 = mpl.colorbar.ColorbarBase(ax, cmap=cmap,
+                                    norm=norm,
+                                    orientation='horizontal')
+    cb1.set_label('Some Units')
+
 
 def pre_plot():
 
@@ -236,7 +302,7 @@ def pre_plot():
 
     return fig,phasor_axes
 
-
-test_wavelength(1)
-test_wavelength(2)
-plt.show()
+if __name__ == '__main__':
+    test_wavelength(1)
+    test_wavelength(2)
+    plt.show()
